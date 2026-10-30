@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MyProjects
+Comment=Keep track of your projects
+Exec=python3 /home/clynx/.local/bin/myprojects
+Icon=myprojects
+Terminal=false
+Categories=Utility;
+StartupWMClass=Myprojects

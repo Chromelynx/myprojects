@@ -1,0 +1,719 @@
+#!/usr/bin/python3
+"""MyProjects — a small desktop project tracker.
+
+Data lives in ~/.local/share/myprojects/projects.json
+Each project has a set of subcategories; each subcategory has a checkbox
+and a comment.
+"""
+
+import json
+import os
+import shutil
+import uuid
+import tkinter as tk
+from tkinter import ttk
+from datetime import datetime
+
+APP_NAME = "MyProjects"
+DATA_DIR = os.path.expanduser("~/.local/share/myprojects")
+DATA_FILE = os.path.join(DATA_DIR, "projects.json")
+
+# --- palette (dark, to match a Hyprland desktop) ---
+BG        = "#1e1e2e"
+SURFACE   = "#181825"
+SURFACE2  = "#313244"
+FG        = "#cdd6f4"
+MUTED     = "#7f849c"
+ACCENT    = "#89b4fa"
+ACCENT_DK = "#11111b"
+GREEN     = "#a6e3a1"
+RED       = "#f38ba8"
+BORDER    = "#45475a"
+
+# Project subcategories (workflow stages, user-defined).
+DEFAULT_SUBCATEGORIES = [
+    "Registration", "Software", "Web", "Apple", "Test",
+    "Maintenance", "Completion",
+]
+
+
+def today():
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def make_default_subcategories():
+    return [{"name": n, "checked": False, "comment": "",
+             "subsubcategories": []}
+            for n in DEFAULT_SUBCATEGORIES]
+
+
+def load_projects():
+    if not os.path.exists(DATA_FILE):
+        return []
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except (json.JSONDecodeError, OSError):
+        try:
+            shutil.copy(DATA_FILE, DATA_FILE + ".corrupt")
+        except OSError:
+            pass
+    return []
+
+
+def save_projects(projects):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = DATA_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(projects, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, DATA_FILE)
+
+
+class ProjectDialog(tk.Toplevel):
+    """Modal add/edit dialog with a name and a note field."""
+
+    def __init__(self, master, title, name="", note=""):
+        super().__init__(master)
+        self.result = None
+        self.title(title)
+        self.configure(bg=BG)
+        self.resizable(False, False)
+        self.transient(master)
+
+        outer = tk.Frame(self, bg=BG, padx=18, pady=18)
+        outer.pack(fill="both", expand=True)
+
+        tk.Label(outer, text=title, bg=BG, fg=FG,
+                 font=("", 18, "bold")).pack(anchor="w")
+
+        tk.Label(outer, text="Project name", bg=BG, fg=MUTED,
+                 font=("", 18)).pack(anchor="w", pady=(14, 2))
+        self.name_var = tk.StringVar(value=name)
+        name_entry = tk.Entry(outer, textvariable=self.name_var, bg=SURFACE2,
+                              fg=FG, insertbackground=FG, relief="flat",
+                              highlightthickness=1, highlightbackground=BORDER,
+                              highlightcolor=ACCENT, font=("", 18))
+        name_entry.pack(fill="x", ipady=6)
+
+        tk.Label(outer, text="Notes (optional)", bg=BG, fg=MUTED,
+                 font=("", 18)).pack(anchor="w", pady=(12, 2))
+        self.note_text = tk.Text(outer, height=5, bg=SURFACE2, fg=FG,
+                                 insertbackground=FG, relief="flat",
+                                 highlightthickness=1,
+                                 highlightbackground=BORDER,
+                                 highlightcolor=ACCENT, font=("", 18),
+                                 wrap="word")
+        self.note_text.insert("1.0", note)
+        self.note_text.pack(fill="both", expand=True)
+
+        btn_row = tk.Frame(outer, bg=BG)
+        btn_row.pack(fill="x", pady=(16, 0))
+        tk.Button(btn_row, text="Cancel", command=self.destroy,
+                  bg=SURFACE2, fg=FG, activebackground=SURFACE2,
+                  activeforeground=FG, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 14), padx=16, pady=6,
+                  cursor="hand2").pack(side="right", padx=(8, 0))
+        tk.Button(btn_row, text="Save", command=self._save,
+                  bg=ACCENT, fg=ACCENT_DK, activebackground=GREEN,
+                  activeforeground=ACCENT_DK, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 14, "bold"),
+                  padx=20, pady=6, cursor="hand2").pack(side="right")
+
+        name_entry.focus_set()
+        name_entry.select_range(0, "end")
+        self.bind("<Return>", lambda e: self._save())
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self._outside_funcid = master.bind("<Button-1>",
+                                           self._on_outside_click, add="+")
+
+    def _on_outside_click(self, event):
+        self.destroy()
+
+    def destroy(self):
+        if getattr(self, "_outside_funcid", None):
+            try:
+                self.master.unbind("<Button-1>", self._outside_funcid)
+            except tk.TclError:
+                pass
+            self._outside_funcid = None
+        super().destroy()
+
+    def _save(self):
+        name = self.name_var.get().strip()
+        if not name:
+            self.bell()
+            return
+        self.result = (name, self.note_text.get("1.0", "end").strip())
+        self.destroy()
+
+
+class SubcategoryWindow(tk.Toplevel):
+    """Modal window for one subcategory: sub-subcategories + a comment field."""
+
+    def __init__(self, master, subcategory):
+        super().__init__(master)
+        self.sub = subcategory
+        self.title(subcategory.get("name", "Subcategory"))
+        self.configure(bg=BG)
+        self.resizable(False, False)
+        self.transient(master)
+
+        outer = tk.Frame(self, bg=BG, padx=18, pady=18)
+        outer.pack(fill="both", expand=True)
+
+        tk.Label(outer, text=subcategory.get("name", ""), bg=BG, fg=FG,
+                 font=("", 18, "bold")).pack(anchor="w")
+
+        tk.Label(outer, text="Tasks", bg=BG, fg=MUTED,
+                 font=("", 18)).pack(anchor="w", pady=(14, 2))
+        ss_frame = tk.Frame(outer, bg=SURFACE2)
+        ss_frame.pack(fill="both", expand=True)
+        self.subsub = tk.Listbox(ss_frame, height=6, bg=SURFACE2, fg=FG,
+                                 relief="flat", highlightthickness=0,
+                                 font=("", 18), activestyle="none",
+                                 selectbackground=SURFACE,
+                                 selectforeground=FG)
+        ss_scroll = ttk.Scrollbar(ss_frame, orient="vertical",
+                                  command=self.subsub.yview)
+        self.subsub.configure(yscrollcommand=ss_scroll.set)
+        self.subsub.pack(side="left", fill="both", expand=True)
+        ss_scroll.pack(side="right", fill="y")
+        self._subsub_items = []
+        for ss in subcategory.get("subsubcategories", []):
+            name = ss.get("name") if isinstance(ss, dict) else ss
+            checked = ss.get("checked", False) if isinstance(ss, dict) \
+                else False
+            self.subsub.insert("end", ("☑" if checked else "☐") + "  " + name)
+            self._subsub_items.append(
+                ss if isinstance(ss, dict) else {"name": name,
+                                                 "checked": checked})
+        self.subsub.bind("<Button-1>", self._toggle_subsub)
+
+        add_row = tk.Frame(outer, bg=BG)
+        add_row.pack(fill="x", pady=(6, 0))
+        self.subsub_entry = tk.Entry(add_row, bg=SURFACE2, fg=FG,
+                                     insertbackground=FG, relief="flat",
+                                     highlightthickness=1,
+                                     highlightbackground=BORDER,
+                                     highlightcolor=ACCENT, font=("", 18))
+        self.subsub_entry.pack(side="left", fill="x", expand=True, ipady=4)
+        self.subsub_entry.bind("<Return>", self._add_subsub)
+        tk.Button(add_row, text="+ Add", command=self._add_subsub,
+                  bg=ACCENT, fg=ACCENT_DK, activebackground=GREEN,
+                  activeforeground=ACCENT_DK, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 14, "bold"),
+                  padx=12, pady=4, cursor="hand2").pack(side="left",
+                                                        padx=(8, 0))
+        tk.Button(add_row, text="Remove", command=self._remove_subsub,
+                  bg=SURFACE2, fg=RED, activebackground=SURFACE2,
+                  activeforeground=RED, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 14),
+                  padx=12, pady=4, cursor="hand2").pack(side="left",
+                                                        padx=(8, 0))
+
+        tk.Label(outer, text="Comment", bg=BG, fg=MUTED,
+                 font=("", 18)).pack(anchor="w", pady=(12, 2))
+        self.comment = tk.Text(outer, height=5, bg=SURFACE2, fg=FG,
+                               insertbackground=FG, relief="flat",
+                               highlightthickness=1, highlightbackground=BORDER,
+                               highlightcolor=ACCENT, font=("", 18),
+                               wrap="word")
+        self.comment.insert("1.0", subcategory.get("comment", ""))
+        self.comment.pack(fill="both", expand=True)
+
+        btn_row = tk.Frame(outer, bg=BG)
+        btn_row.pack(fill="x", pady=(14, 0))
+        tk.Button(btn_row, text="Cancel", command=self.destroy,
+                  bg=SURFACE2, fg=FG, activebackground=SURFACE2,
+                  activeforeground=FG, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 14), padx=16, pady=6,
+                  cursor="hand2").pack(side="right", padx=(8, 0))
+        tk.Button(btn_row, text="Save", command=self._save,
+                  bg=ACCENT, fg=ACCENT_DK, activebackground=GREEN,
+                  activeforeground=ACCENT_DK, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 14, "bold"),
+                  padx=20, pady=6, cursor="hand2").pack(side="right")
+
+        self.comment.focus_set()
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self._save)
+        self._outside_funcid = master.bind("<Button-1>",
+                                           self._on_outside_click, add="+")
+
+    def _on_outside_click(self, event):
+        self._save()
+
+    def destroy(self):
+        if getattr(self, "_outside_funcid", None):
+            try:
+                self.master.unbind("<Button-1>", self._outside_funcid)
+            except tk.TclError:
+                pass
+            self._outside_funcid = None
+        super().destroy()
+
+    def _toggle_subsub(self, event):
+        idx = self.subsub.nearest(event.y)
+        if idx < 0 or idx >= len(self._subsub_items):
+            return
+        ss = self._subsub_items[idx]
+        ss["checked"] = not ss.get("checked", False)
+        self.subsub.delete(idx)
+        self.subsub.insert(idx, ("☑" if ss["checked"] else "☐") + "  " +
+                           ss["name"])
+        self.subsub.selection_clear(0, "end")
+        self.subsub.selection_set(idx)
+
+    def _add_subsub(self, event=None):
+        name = self.subsub_entry.get().strip()
+        if not name:
+            self.bell()
+            return
+        new = {"name": name, "checked": False}
+        self.sub["subsubcategories"].append(new)
+        self._subsub_items.append(new)
+        self.subsub.insert("end", "☐  " + name)
+        self.subsub_entry.delete(0, "end")
+
+    def _remove_subsub(self):
+        sel = self.subsub.curselection()
+        if not sel:
+            self.bell()
+            return
+        idx = sel[0]
+        self._subsub_items.pop(idx)
+        self.sub["subsubcategories"].pop(idx)
+        self.subsub.delete(idx)
+
+    def _save(self):
+        self.sub["comment"] = self.comment.get("1.0", "end").strip()
+        self.destroy()
+
+
+class MyProjectsApp:
+    def __init__(self, root):
+        self.root = root
+        self.projects = load_projects()
+        self.filter_var = tk.StringVar(value="active")
+        self.search_var = tk.StringVar()
+        self.search_ph = "Search"
+        self.quick_ph = "Add a project — type a name and press Enter"
+        self._sub_vars = []
+
+        # upgrade any project that predates subcategories / sub-subcategories
+        changed = False
+        for p in self.projects:
+            if "subcategories" not in p:
+                p["subcategories"] = make_default_subcategories()
+                changed = True
+            for sub in p.get("subcategories", []):
+                if "subsubcategories" not in sub:
+                    sub["subsubcategories"] = []
+                    changed = True
+        if changed:
+            save_projects(self.projects)
+
+        root.title(APP_NAME)
+        root.configure(bg=BG)
+        root.geometry("1080x640")
+        root.minsize(720, 460)
+
+        self._build_style()
+        self._build_ui()
+        self.refresh()
+
+        self.search_var.trace_add("write", lambda *a: self.refresh())
+        self.filter_var.trace_add("write", lambda *a: self.refresh())
+
+    # ---- styling ----
+    def _build_style(self):
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("Vertical.TScrollbar", background=SURFACE2,
+                        troughcolor=BG, borderwidth=0, arrowsize=12)
+        style.configure("Toolbutton", background=SURFACE2, foreground=MUTED,
+                        padding=(12, 6), font=("", 13))
+        style.map("Toolbutton",
+                  background=[("selected", ACCENT), ("active", SURFACE2)],
+                  foreground=[("selected", ACCENT_DK)])
+        style.configure("TCheckbutton", background=SURFACE, foreground=FG,
+                        font=("", 10))
+        style.map("TCheckbutton",
+                  background=[("active", SURFACE)],
+                  foreground=[("active", FG)],
+                  indicatorcolor=[("selected", ACCENT),
+                                  ("!selected", SURFACE2)])
+
+    # ---- UI ----
+    def _build_ui(self):
+        header = tk.Frame(self.root, bg=BG)
+        header.pack(fill="x", padx=20, pady=(18, 6))
+        tk.Label(header, text=APP_NAME, bg=BG, fg=FG,
+                 font=("", 26, "bold")).pack(side="left")
+        self.count_label = tk.Label(header, text="", bg=BG, fg=MUTED,
+                                    font=("", 13))
+        self.count_label.pack(side="right", pady=(8, 0))
+
+        # quick-add
+        quick = tk.Frame(self.root, bg=BG)
+        quick.pack(fill="x", padx=20, pady=(0, 8))
+        self.quick_entry = tk.Entry(quick, bg=SURFACE2, fg=FG,
+                                    insertbackground=FG, relief="flat",
+                                    highlightthickness=1,
+                                    highlightbackground=BORDER,
+                                    highlightcolor=ACCENT, font=("", 14))
+        self.quick_entry.pack(fill="x", ipady=7)
+        self._set_placeholder(self.quick_entry, self.quick_ph)
+        self.quick_entry.bind("<Return>", self._quick_add)
+        self.quick_entry.bind("<FocusIn>", self._clear_placeholder)
+        self.quick_entry.bind("<FocusOut>", self._restore_placeholder)
+
+        # filter + search
+        bar = tk.Frame(self.root, bg=BG)
+        bar.pack(fill="x", padx=20, pady=(0, 10))
+        self.search_entry = tk.Entry(bar, textvariable=self.search_var,
+                                     bg=SURFACE2, fg=FG, insertbackground=FG,
+                                     relief="flat", highlightthickness=1,
+                                     highlightbackground=BORDER,
+                                     highlightcolor=ACCENT, font=("", 13),
+                                     width=18)
+        self.search_entry.pack(side="left", ipady=5)
+        self._set_placeholder(self.search_entry, self.search_ph)
+        self.search_entry.bind("<FocusIn>", self._clear_placeholder)
+        self.search_entry.bind("<FocusOut>", self._restore_placeholder)
+
+        for text, val in (("Done", "done"), ("All", "all"),
+                          ("Active", "active")):
+            ttk.Radiobutton(bar, text=text, value=val,
+                            variable=self.filter_var,
+                            style="Toolbutton").pack(side="right",
+                                                     padx=(4, 0))
+
+        # scrollable project list
+        list_area = tk.Frame(self.root, bg=BG)
+        list_area.pack(fill="both", expand=True, padx=20)
+        self.main_canvas = tk.Canvas(list_area, bg=BG, highlightthickness=0)
+        vscroll = ttk.Scrollbar(list_area, orient="vertical",
+                                command=self.main_canvas.yview)
+        hscroll = ttk.Scrollbar(list_area, orient="horizontal",
+                                command=self.main_canvas.xview)
+        self.main_canvas.configure(yscrollcommand=vscroll.set,
+                                   xscrollcommand=hscroll.set)
+        self.projects_frame = tk.Frame(self.main_canvas, bg=BG)
+        self.projects_frame.bind("<Configure>", lambda e:
+                                 self.main_canvas.configure(
+                                     scrollregion=self.main_canvas.bbox("all")))
+
+        def _sync_width(event):
+            self.main_canvas.itemconfigure(
+                self._main_window,
+                width=max(event.width, self.projects_frame.winfo_reqwidth()))
+
+        self._main_window = self.main_canvas.create_window(
+            (0, 0), window=self.projects_frame, anchor="nw")
+        self.main_canvas.bind("<Configure>", _sync_width)
+        self.main_canvas.pack(side="left", fill="both", expand=True)
+        vscroll.pack(side="right", fill="y")
+        hscroll.pack(side="bottom", fill="x")
+        for w in (self.main_canvas, self.projects_frame):
+            self._bind_wheel(w)
+
+        # bottom: new project
+        btns = tk.Frame(self.root, bg=BG)
+        btns.pack(fill="x", padx=20, pady=12)
+        tk.Button(btns, text="+  New Project", command=self._add,
+                  bg=ACCENT, fg=ACCENT_DK, activebackground=GREEN,
+                  activeforeground=ACCENT_DK, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 13, "bold"),
+                  padx=16, pady=8, cursor="hand2").pack(side="left")
+
+    def _bind_wheel(self, widget):
+        widget.bind("<MouseWheel>", self._on_mousewheel)
+        widget.bind("<Button-4>", self._on_mousewheel)
+        widget.bind("<Button-5>", self._on_mousewheel)
+
+    def _on_mousewheel(self, event):
+        if getattr(event, "num", 0) == 4:
+            self.main_canvas.yview_scroll(-1, "units")
+        elif getattr(event, "num", 0) == 5:
+            self.main_canvas.yview_scroll(1, "units")
+        elif getattr(event, "delta", 0):
+            self.main_canvas.yview_scroll(int(-event.delta / 120), "units")
+
+    def _place_below(self, win, anchor):
+        """Position a popup window just below the given widget (clamped)."""
+        win.update_idletasks()
+        w = win.winfo_width()
+        h = win.winfo_height()
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        x = anchor.winfo_rootx()
+        y = anchor.winfo_rooty() + anchor.winfo_height() + 6
+        if x + w > sw:
+            x = max(0, sw - w - 12)
+        if y + h > sh:
+            y = max(0, sh - h - 12)
+        win.geometry(f"+{x}+{y}")
+
+    # ---- placeholder handling ----
+    def _set_placeholder(self, entry, text):
+        entry._ph = text
+        entry._has_ph = True
+        entry.delete(0, "end")
+        entry.insert(0, text)
+        entry.configure(fg=MUTED)
+
+    def _clear_placeholder(self, event):
+        e = event.widget
+        if getattr(e, "_has_ph", False):
+            e.delete(0, "end")
+            e._has_ph = False
+            e.configure(fg=FG)
+
+    def _restore_placeholder(self, event):
+        e = event.widget
+        if not e.get() and hasattr(e, "_ph"):
+            e._has_ph = True
+            e.insert(0, e._ph)
+            e.configure(fg=MUTED)
+
+    def _reset_placeholder(self, entry):
+        entry.delete(0, "end")
+        entry._has_ph = True
+        entry.insert(0, entry._ph)
+        entry.configure(fg=MUTED)
+
+    # ---- rendering ----
+    def _visible_projects(self):
+        status_filter = self.filter_var.get()
+        query = self.search_var.get().strip().lower()
+        if query == self.search_ph.lower():
+            query = ""
+        active, done = [], []
+        for p in self.projects:
+            if status_filter == "active" and p.get("status") == "done":
+                continue
+            if status_filter == "done" and p.get("status") != "done":
+                continue
+            if query and query not in p.get("name", "").lower() and \
+               query not in p.get("note", "").lower():
+                continue
+            (done if p.get("status") == "done" else active).append(p)
+        active.sort(key=lambda p: p.get("created", ""), reverse=True)
+        done.sort(key=lambda p: p.get("completed", p.get("created", "")),
+                  reverse=True)
+        return active + done
+
+    def refresh(self):
+        active_n = sum(1 for p in self.projects if p.get("status") != "done")
+        self.count_label.configure(
+            text=f"{active_n} active · {len(self.projects)} total")
+        self._render_projects()
+
+    def _render_projects(self):
+        for w in self.projects_frame.winfo_children():
+            w.destroy()
+        self._sub_vars = []
+        visible = self._visible_projects()
+        if not visible:
+            tk.Label(self.projects_frame,
+                     text="No projects here. Type a name above and press "
+                          "Enter to add one.",
+                     bg=BG, fg=MUTED, font=("", 14), wraplength=500,
+                     justify="left").pack(anchor="w", padx=4, pady=18)
+            return
+        for p in visible:
+            self._render_project_block(p)
+
+    def _render_project_block(self, p):
+        is_done = p.get("status") == "done"
+        block = tk.Frame(self.projects_frame, bg=SURFACE)
+        block.pack(fill="x", pady=(0, 8))
+
+        # line 1: project name + subcategories, all on one horizontal line
+        line1 = tk.Frame(block, bg=SURFACE)
+        line1.pack(fill="x")
+        name = ("✓ " if is_done else "") + p.get("name", "Untitled")
+        name_btn = tk.Button(line1, text=name, anchor="w",
+                             bg=SURFACE, fg=(MUTED if is_done else FG),
+                             activebackground=SURFACE2, activeforeground=FG,
+                             relief="flat", bd=0, highlightthickness=0,
+                             font=("", 15, "bold"), cursor="hand2")
+        name_btn.pack(side="left", padx=(10, 8), pady=(8, 0))
+        name_btn.configure(command=lambda pp=p, w=name_btn:
+                           self._edit_project(pp, w))
+        # start date next to the name; completion date only when done
+        tk.Label(line1, text=p.get("created", ""), bg=SURFACE, fg=MUTED,
+                 font=("", 12)).pack(side="left", padx=(0, 6), pady=(8, 0))
+        if is_done and p.get("completed"):
+            tk.Label(line1, text="→ " + p["completed"], bg=SURFACE, fg=MUTED,
+                     font=("", 12)).pack(side="left", padx=(0, 6),
+                                         pady=(8, 0))
+        for sub in p.get("subcategories", []):
+            cell = tk.Frame(line1, bg=SURFACE)
+            cell.pack(side="left", padx=(0, 3), pady=(8, 0))
+            var = tk.BooleanVar(value=bool(sub.get("checked")))
+            self._sub_vars.append(var)
+            cb = ttk.Checkbutton(cell, variable=var,
+                                 command=lambda s=sub, v=var:
+                                 self._toggle_subcategory(s, v))
+            cb.pack(side="left")
+            btn = tk.Button(cell, text=sub["name"], anchor="w",
+                            bg=SURFACE, fg=FG, activebackground=SURFACE2,
+                            activeforeground=FG, relief="flat", bd=0,
+                            highlightthickness=0, font=("", 14),
+                            cursor="hand2")
+            btn.pack(side="left")
+            btn.configure(command=lambda s=sub, w=btn:
+                          self._open_subcategory(s, w))
+            for w in (cell, cb, btn):
+                self._bind_wheel(w)
+
+        # line 2: actions
+        line2 = tk.Frame(block, bg=SURFACE)
+        line2.pack(fill="x")
+        edit_btn = self._small_button(line2, "Edit", None)
+        edit_btn.pack(side="left", padx=(12, 6), pady=(0, 8))
+        edit_btn.configure(command=lambda pp=p, w=edit_btn:
+                           self._edit_project(pp, w))
+        self._small_button(line2, "Active" if is_done else "Done",
+                           lambda pp=p: self._toggle_project(pp)).pack(
+            side="left", padx=(0, 6), pady=(0, 8))
+        del_btn = self._small_button(line2, "Delete", None, danger=True)
+        del_btn.pack(side="left", pady=(0, 8))
+        del_btn.configure(command=lambda pp=p, w=del_btn:
+                          self._delete_project(pp, w))
+
+    def _small_button(self, parent, text, command, danger=False):
+        fg = RED if danger else MUTED
+        return tk.Button(parent, text=text, command=command, bg=SURFACE,
+                         fg=fg, activebackground=SURFACE2, activeforeground=fg,
+                         relief="flat", bd=0, highlightthickness=0,
+                         font=("", 14), padx=8, pady=2, cursor="hand2")
+
+    # ---- subcategory actions ----
+    def _toggle_subcategory(self, sub, var):
+        sub["checked"] = bool(var.get())
+        save_projects(self.projects)
+
+    def _open_subcategory(self, sub, anchor=None):
+        win = SubcategoryWindow(self.root, sub)
+        if anchor is not None:
+            self._place_below(win, anchor)
+        self.root.wait_window(win)
+        save_projects(self.projects)
+
+    # ---- project actions ----
+    def _quick_add(self, event=None):
+        name = self.quick_entry.get().strip()
+        if not name or getattr(self.quick_entry, "_has_ph", False):
+            return
+        self.projects.append({"id": uuid.uuid4().hex, "name": name, "note": "",
+                              "status": "active", "created": today(),
+                              "subcategories": make_default_subcategories()})
+        save_projects(self.projects)
+        self._reset_placeholder(self.quick_entry)
+        self.refresh()
+
+    def _add(self):
+        dlg = ProjectDialog(self.root, "New Project")
+        self.root.wait_window(dlg)
+        if dlg.result:
+            name, note = dlg.result
+            self.projects.append({"id": uuid.uuid4().hex, "name": name,
+                                  "note": note, "status": "active",
+                                  "created": today(),
+                                  "subcategories": make_default_subcategories()})
+            save_projects(self.projects)
+            self.refresh()
+
+    def _edit_project(self, p, anchor=None):
+        dlg = ProjectDialog(self.root, "Edit Project", name=p.get("name", ""),
+                            note=p.get("note", ""))
+        if anchor is not None:
+            self._place_below(dlg, anchor)
+        self.root.wait_window(dlg)
+        if dlg.result:
+            p["name"], p["note"] = dlg.result
+            save_projects(self.projects)
+            self.refresh()
+
+    def _toggle_project(self, p):
+        if p.get("status") == "done":
+            p["status"] = "active"
+            p.pop("completed", None)
+        else:
+            p["status"] = "done"
+            p["completed"] = today()
+        save_projects(self.projects)
+        self.refresh()
+
+    def _delete_project(self, p, anchor=None):
+        if not self._confirm(f'Delete "{p.get("name")}"?\n'
+                             "This can't be undone.", anchor=anchor):
+            return
+        self.projects = [x for x in self.projects if x["id"] != p["id"]]
+        save_projects(self.projects)
+        self.refresh()
+
+    def _confirm(self, message, anchor=None):
+        result = {"ok": False}
+        dlg = tk.Toplevel(self.root)
+        dlg.title("Confirm")
+        dlg.configure(bg=BG)
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        frame = tk.Frame(dlg, bg=BG, padx=22, pady=18)
+        frame.pack(fill="both", expand=True)
+        tk.Label(frame, text=message, bg=BG, fg=FG, justify="left",
+                 font=("", 18)).pack(anchor="w")
+        row = tk.Frame(frame, bg=BG)
+        row.pack(fill="x", pady=(16, 0))
+
+        def ok():
+            result["ok"] = True
+            dlg.destroy()
+
+        tk.Button(row, text="Cancel", command=dlg.destroy, bg=SURFACE2, fg=FG,
+                  activebackground=SURFACE2, activeforeground=FG,
+                  relief="flat", bd=0, font=("", 14), padx=16, pady=6,
+                  cursor="hand2").pack(side="right", padx=(8, 0))
+        tk.Button(row, text="Delete", command=ok, bg=RED, fg=ACCENT_DK,
+                  activebackground=RED, activeforeground=ACCENT_DK,
+                  relief="flat", bd=0, font=("", 14, "bold"), padx=16,
+                  pady=6, cursor="hand2").pack(side="right")
+        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+
+        def _cleanup():
+            try:
+                self.root.unbind("<Button-1>", _funcid)
+            except tk.TclError:
+                pass
+
+        def _on_outside(event):
+            _cleanup()
+            dlg.destroy()
+
+        _funcid = self.root.bind("<Button-1>", _on_outside, add="+")
+
+        if anchor is not None:
+            self._place_below(dlg, anchor)
+        self.root.wait_window(dlg)
+        _cleanup()
+        return result["ok"]
+
+
+def main():
+    root = tk.Tk(className=APP_NAME)
+    MyProjectsApp(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
