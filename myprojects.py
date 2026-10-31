@@ -185,7 +185,7 @@ class SubcategoryWindow(tk.Toplevel):
     def __init__(self, master, subcategory):
         super().__init__(master)
         self.sub = subcategory
-        self.title(subcategory.get("name", "Subcategory"))
+        self.title(subcategory.get("name", "Category"))
         self.configure(bg=BG)
         self.resizable(False, False)
         self.transient(master)
@@ -328,7 +328,7 @@ class ManageSubcategoriesWindow(tk.Toplevel):
     def __init__(self, master, names, project_name=""):
         super().__init__(master)
         self.result = None  # list of names, or None on cancel
-        self.title("Manage Subcategories")
+        self.title("Manage Categories")
         self.configure(bg=BG)
         self.resizable(False, False)
         self.transient(master)
@@ -336,7 +336,7 @@ class ManageSubcategoriesWindow(tk.Toplevel):
         outer = tk.Frame(self, bg=BG, padx=18, pady=18)
         outer.pack(fill="both", expand=True)
 
-        heading = "Subcategories" + (" \u2014 " + project_name if project_name else "")
+        heading = "Categories" + (" \u2014 " + project_name if project_name else "")
         tk.Label(outer, text=heading, bg=BG, fg=FG,
                  font=("", 18, "bold")).pack(anchor="w")
         tk.Label(outer, text="These stages belong to this project only, in order.",
@@ -795,7 +795,7 @@ class MyProjectsApp:
             for w in (cell, cb, btn):
                 self._bind_wheel(w)
 
-        mgr = self._small_button(self.projects_frame, "Manage Subcategories",
+        mgr = self._small_button(self.projects_frame, "Manage Categories",
                                  None)
         mgr.grid(row=r, column=3 + len(col_names), sticky="ne",
                  padx=(8, 4), pady=(10, 0))
