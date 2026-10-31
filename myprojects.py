@@ -760,15 +760,13 @@ class MyProjectsApp:
             cell = tk.Frame(self.projects_frame, bg=BG)
             cell.grid(row=r, column=2 + j, sticky="nw", padx=(0, 8),
                       pady=(10, 0))
-            top = tk.Frame(cell, bg=BG)
-            top.pack(side="top", anchor="w")
             var = tk.BooleanVar(value=bool(sub.get("checked")))
             self._sub_vars.append(var)
-            cb = ttk.Checkbutton(top, variable=var,
+            cb = ttk.Checkbutton(cell, variable=var,
                                  command=lambda s=sub, v=var:
                                  self._toggle_subcategory(s, v))
             cb.pack(side="left")
-            btn = tk.Button(top, text=cname, anchor="w",
+            btn = tk.Button(cell, text=cname, anchor="w",
                             bg=BG, fg=FG, activebackground=SURFACE2,
                             activeforeground=FG, relief="flat", bd=0,
                             highlightthickness=0, font=("", 14),
@@ -776,17 +774,8 @@ class MyProjectsApp:
             btn.pack(side="left")
             btn.configure(command=lambda s=sub, w=name_btn:
                           self._open_subcategory(s, w))
-            for w in (cell, top, cb, btn):
+            for w in (cell, cb, btn):
                 self._bind_wheel(w)
-            tasks = sub.get("subsubcategories", [])
-            if tasks:
-                names = [ss.get("name") if isinstance(ss, dict) else str(ss)
-                         for ss in tasks]
-                tlbl = tk.Label(cell, text=" · ".join(names), bg=BG,
-                                fg=MUTED, font=("", 12), anchor="w",
-                                justify="left")
-                tlbl.pack(side="top", anchor="w", pady=(3, 0))
-                self._bind_wheel(tlbl)
 
         mgr = self._small_button(self.projects_frame, "Manage Subcategories",
                                  None)
