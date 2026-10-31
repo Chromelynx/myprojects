@@ -535,10 +535,10 @@ class MyProjectsApp:
         style.map("Toolbutton",
                   background=[("selected", ACCENT), ("active", SURFACE2)],
                   foreground=[("selected", ACCENT_DK)])
-        style.configure("TCheckbutton", background=SURFACE, foreground=FG,
+        style.configure("TCheckbutton", background=BG, foreground=FG,
                         font=("", 10))
         style.map("TCheckbutton",
-                  background=[("active", SURFACE)],
+                  background=[("active", BG)],
                   foreground=[("active", FG)],
                   indicatorcolor=[("selected", ACCENT),
                                   ("!selected", SURFACE2)])
@@ -706,44 +706,71 @@ class MyProjectsApp:
                      bg=BG, fg=MUTED, font=("", 14), wraplength=500,
                      justify="left").pack(anchor="w", padx=4, pady=18)
             return
+        col_names = self._subcategory_columns(visible)
+        for i, p in enumerate(visible):
+            self._render_project_row(p, i, col_names)
+
+    def _subcategory_columns(self, visible):
+        """Ordered union of subcategory names across visible projects.
+
+        Default stages lead (in their saved order), then any extra names a
+        project carries, first-seen. New defaults therefore become new
+        columns automatically and stay aligned for every project.
+        """
+        order = []
+        seen = set()
+        for name in load_default_subcategories():
+            if name not in seen:
+                seen.add(name)
+                order.append(name)
         for p in visible:
-            self._render_project_block(p)
+            for s in p.get("subcategories", []):
+                n = s.get("name")
+                if n and n not in seen:
+                    seen.add(n)
+                    order.append(n)
+        return order
 
-    def _render_project_block(self, p):
+    def _render_project_row(self, p, i, col_names):
         is_done = p.get("status") == "done"
-        block = tk.Frame(self.projects_frame, bg=SURFACE)
-        block.pack(fill="x", pady=(0, 8))
+        r = i * 2
+        subs_by_name = {s.get("name"): s for s in p.get("subcategories", [])}
 
-        # line 1: project name + subcategories, all on one horizontal line
-        line1 = tk.Frame(block, bg=SURFACE)
-        line1.pack(fill="x")
         name = ("✓ " if is_done else "") + p.get("name", "Untitled")
-        name_btn = tk.Button(line1, text=name, anchor="w",
-                             bg=SURFACE, fg=(MUTED if is_done else FG),
+        name_btn = tk.Button(self.projects_frame, text=name, anchor="w",
+                             bg=BG, fg=(MUTED if is_done else FG),
                              activebackground=SURFACE2, activeforeground=FG,
                              relief="flat", bd=0, highlightthickness=0,
                              font=("", 15, "bold"), cursor="hand2")
-        name_btn.pack(side="left", padx=(10, 8), pady=(8, 0))
+        name_btn.grid(row=r, column=0, sticky="nw", padx=(4, 8), pady=(10, 0))
         name_btn.configure(command=lambda pp=p, w=name_btn:
                            self._edit_project(pp, w))
-        # start date next to the name; completion date only when done
-        tk.Label(line1, text=p.get("created", ""), bg=SURFACE, fg=MUTED,
-                 font=("", 12)).pack(side="left", padx=(0, 6), pady=(8, 0))
+
+        dates = p.get("created", "")
         if is_done and p.get("completed"):
-            tk.Label(line1, text="→ " + p["completed"], bg=SURFACE, fg=MUTED,
-                     font=("", 12)).pack(side="left", padx=(0, 6),
-                                         pady=(8, 0))
-        for sub in p.get("subcategories", []):
-            cell = tk.Frame(line1, bg=SURFACE)
-            cell.pack(side="left", padx=(0, 3), pady=(8, 0))
+            dates += "\n→ " + p["completed"]
+        tk.Label(self.projects_frame, text=dates, bg=BG, fg=MUTED,
+                 font=("", 12), justify="left").grid(row=r, column=1,
+                 sticky="nw", padx=(0, 8), pady=(10, 0))
+
+        for j, cname in enumerate(col_names):
+            sub = subs_by_name.get(cname)
+            if sub is None:
+                tk.Label(self.projects_frame, text="", bg=BG).grid(
+                    row=r, column=2 + j, sticky="nw", padx=(0, 8),
+                    pady=(10, 0))
+                continue
+            cell = tk.Frame(self.projects_frame, bg=BG)
+            cell.grid(row=r, column=2 + j, sticky="nw", padx=(0, 8),
+                      pady=(10, 0))
             var = tk.BooleanVar(value=bool(sub.get("checked")))
             self._sub_vars.append(var)
             cb = ttk.Checkbutton(cell, variable=var,
                                  command=lambda s=sub, v=var:
                                  self._toggle_subcategory(s, v))
             cb.pack(side="left")
-            btn = tk.Button(cell, text=sub["name"], anchor="w",
-                            bg=SURFACE, fg=FG, activebackground=SURFACE2,
+            btn = tk.Button(cell, text=cname, anchor="w",
+                            bg=BG, fg=FG, activebackground=SURFACE2,
                             activeforeground=FG, relief="flat", bd=0,
                             highlightthickness=0, font=("", 14),
                             cursor="hand2")
@@ -753,18 +780,18 @@ class MyProjectsApp:
             for w in (cell, cb, btn):
                 self._bind_wheel(w)
 
-        # line 2: actions
-        line2 = tk.Frame(block, bg=SURFACE)
-        line2.pack(fill="x")
-        edit_btn = self._small_button(line2, "Edit", None)
-        edit_btn.pack(side="left", padx=(12, 6), pady=(0, 8))
+        acts = tk.Frame(self.projects_frame, bg=BG)
+        acts.grid(row=r + 1, column=0, columnspan=2 + len(col_names),
+                  sticky="w", padx=(4, 0), pady=(0, 10))
+        edit_btn = self._small_button(acts, "Edit", None)
+        edit_btn.pack(side="left", padx=(0, 6))
         edit_btn.configure(command=lambda pp=p, w=edit_btn:
                            self._edit_project(pp, w))
-        self._small_button(line2, "Active" if is_done else "Done",
+        self._small_button(acts, "Active" if is_done else "Done",
                            lambda pp=p: self._toggle_project(pp)).pack(
-            side="left", padx=(0, 6), pady=(0, 8))
-        del_btn = self._small_button(line2, "Delete", None, danger=True)
-        del_btn.pack(side="left", pady=(0, 8))
+            side="left", padx=(0, 6))
+        del_btn = self._small_button(acts, "Delete", None, danger=True)
+        del_btn.pack(side="left")
         del_btn.configure(command=lambda pp=p, w=del_btn:
                           self._delete_project(pp, w))
 
