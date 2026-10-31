@@ -729,10 +729,9 @@ class MyProjectsApp:
         r = i * 3 + 1
         subs_by_name = {s.get("name"): s for s in p.get("subcategories", [])}
 
-        if i > 0:
-            tk.Frame(self.projects_frame, bg=BORDER, height=1).grid(
-                row=r - 1, column=0, columnspan=4 + len(col_names),
-                sticky="ew", pady=(0, 8))
+        tk.Frame(self.projects_frame, bg=BORDER, height=1).grid(
+            row=r - 1, column=0, columnspan=4 + len(col_names),
+            sticky="ew", pady=(0, 8))
 
         name = ("✓ " if is_done else "") + p.get("name", "Untitled")
         name_btn = tk.Button(self.projects_frame, text=name, anchor="w",
