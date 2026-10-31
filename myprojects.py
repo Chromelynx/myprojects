@@ -772,7 +772,7 @@ class MyProjectsApp:
                             highlightthickness=0, font=("", 14),
                             cursor="hand2")
             btn.pack(side="left")
-            btn.configure(command=lambda s=sub, w=btn:
+            btn.configure(command=lambda s=sub, w=name_btn:
                           self._open_subcategory(s, w))
             for w in (cell, cb, btn):
                 self._bind_wheel(w)
