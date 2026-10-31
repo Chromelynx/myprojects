@@ -722,18 +722,11 @@ class MyProjectsApp:
             self._render_project_row(p, i, col_names)
 
     def _subcategory_columns(self, visible):
-        """Ordered union of subcategory names across visible projects.
-
-        Default stages lead (in their saved order), then any extra names a
-        project carries, first-seen. New defaults therefore become new
-        columns automatically and stay aligned for every project.
-        """
+        """Column order = each project's category order (as set in the
+        Manage Categories window): first-seen across visible projects wins,
+        so the top of a project's list is its leftmost column."""
         order = []
         seen = set()
-        for name in load_default_subcategories():
-            if name not in seen:
-                seen.add(name)
-                order.append(name)
         for p in visible:
             for s in p.get("categories", []):
                 n = s.get("name")
