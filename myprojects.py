@@ -781,7 +781,7 @@ class MyProjectsApp:
                                  None)
         mgr.grid(row=r, column=3 + len(col_names), sticky="ne",
                  padx=(8, 4), pady=(10, 0))
-        mgr.configure(command=lambda pp=p, w=mgr:
+        mgr.configure(command=lambda pp=p, w=name_btn:
                       self._manage_project_subcategories(pp, w))
 
         acts = tk.Frame(self.projects_frame, bg=BG)
