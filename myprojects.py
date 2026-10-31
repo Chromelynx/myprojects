@@ -323,11 +323,11 @@ class SubcategoryWindow(tk.Toplevel):
 
 
 class ManageSubcategoriesWindow(tk.Toplevel):
-    """Edit the default subcategory list: add, remove, and reorder."""
+    """Edit one project's subcategory list: add, remove, and reorder."""
 
-    def __init__(self, master, names):
+    def __init__(self, master, names, project_name=""):
         super().__init__(master)
-        self.result = None  # (names, apply_existing) or None on cancel
+        self.result = None  # list of names, or None on cancel
         self.title("Manage Subcategories")
         self.configure(bg=BG)
         self.resizable(False, False)
@@ -336,9 +336,10 @@ class ManageSubcategoriesWindow(tk.Toplevel):
         outer = tk.Frame(self, bg=BG, padx=18, pady=18)
         outer.pack(fill="both", expand=True)
 
-        tk.Label(outer, text="Subcategories", bg=BG, fg=FG,
+        heading = "Subcategories" + (" \u2014 " + project_name if project_name else "")
+        tk.Label(outer, text=heading, bg=BG, fg=FG,
                  font=("", 18, "bold")).pack(anchor="w")
-        tk.Label(outer, text="Every new project starts with these, in order.",
+        tk.Label(outer, text="These stages belong to this project only, in order.",
                  bg=BG, fg=MUTED, font=("", 13)).pack(anchor="w", pady=(2, 10))
 
         mid = tk.Frame(outer, bg=BG)
@@ -380,16 +381,10 @@ class ManageSubcategoriesWindow(tk.Toplevel):
                   highlightthickness=0, font=("", 14, "bold"),
                   padx=12, pady=4, cursor="hand2").pack(side="left", padx=(8, 0))
 
-        self.apply_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(outer, text="Also update existing projects",
-                       variable=self.apply_var, bg=BG, fg=FG,
-                       activebackground=BG, activeforeground=FG,
-                       selectcolor=SURFACE2, font=("", 13),
-                       anchor="w").pack(anchor="w", pady=(12, 0))
-        tk.Label(outer, text="(removing a stage also deletes its checkmarks,\n"
-                             "tasks and notes in those projects)",
+        tk.Label(outer, text="Removing a stage deletes its tasks and notes "
+                             "in this project.",
                  bg=BG, fg=MUTED, font=("", 13), justify="left").pack(
-            anchor="w", pady=(2, 0))
+            anchor="w", pady=(12, 0))
 
         btn_row = tk.Frame(outer, bg=BG)
         btn_row.pack(fill="x", pady=(14, 0))
@@ -483,7 +478,7 @@ class ManageSubcategoriesWindow(tk.Toplevel):
         if not names:
             self.bell()
             return
-        self.result = (names, self.apply_var.get())
+        self.result = names
         self.destroy()
 
 
@@ -611,12 +606,6 @@ class MyProjectsApp:
                   activeforeground=ACCENT_DK, relief="flat", bd=0,
                   highlightthickness=0, font=("", 13, "bold"),
                   padx=16, pady=8, cursor="hand2").pack(side="left")
-        tk.Button(btns, text="Manage Subcategories",
-                  command=self._manage_subcategories, bg=SURFACE2, fg=FG,
-                  activebackground=SURFACE2, activeforeground=FG,
-                  relief="flat", bd=0, highlightthickness=0,
-                  font=("", 13), padx=16, pady=8,
-                  cursor="hand2").pack(side="left", padx=(8, 0))
 
     def _bind_wheel(self, widget):
         widget.bind("<MouseWheel>", self._on_mousewheel)
@@ -707,6 +696,10 @@ class MyProjectsApp:
                      justify="left").pack(anchor="w", padx=4, pady=18)
             return
         col_names = self._subcategory_columns(visible)
+        if getattr(self, "_spacer_col", None) is not None:
+            self.projects_frame.grid_columnconfigure(self._spacer_col, weight=0)
+        self._spacer_col = 2 + len(col_names)
+        self.projects_frame.grid_columnconfigure(self._spacer_col, weight=1)
         for i, p in enumerate(visible):
             self._render_project_row(p, i, col_names)
 
@@ -780,6 +773,13 @@ class MyProjectsApp:
             for w in (cell, cb, btn):
                 self._bind_wheel(w)
 
+        mgr = self._small_button(self.projects_frame, "Manage Subcategories",
+                                 None)
+        mgr.grid(row=r, column=3 + len(col_names), sticky="ne",
+                 padx=(8, 4), pady=(10, 0))
+        mgr.configure(command=lambda pp=p, w=mgr:
+                      self._manage_project_subcategories(pp, w))
+
         acts = tk.Frame(self.projects_frame, bg=BG)
         acts.grid(row=r + 1, column=0, columnspan=2 + len(col_names),
                   sticky="w", padx=(4, 0), pady=(0, 10))
@@ -827,36 +827,30 @@ class MyProjectsApp:
             save_projects(self.projects)
             self.refresh()
 
-    def _manage_subcategories(self):
-        names = load_default_subcategories()
-        win = ManageSubcategoriesWindow(self.root, names)
+    def _manage_project_subcategories(self, p, anchor=None):
+        names = [s.get("name") for s in p.get("subcategories", [])]
+        win = ManageSubcategoriesWindow(self.root, names,
+                                        project_name=p.get("name", ""))
+        if anchor is not None:
+            self._place_below(win, anchor)
         self.root.wait_window(win)
         if not win.result:
             return
-        new_names, apply_existing = win.result
-        save_default_subcategories(new_names)
-        if apply_existing:
-            self._apply_defaults_to_projects(new_names)
+        self._reconcile_subcategories(p, win.result)
+        save_projects(self.projects)
         self.refresh()
 
-    def _apply_defaults_to_projects(self, new_names):
-        changed = False
-        for p in self.projects:
-            subs = p.get("subcategories", [])
-            by_name = {s.get("name"): s for s in subs}
-            new_subs = []
-            for name in new_names:
-                if name in by_name:
-                    new_subs.append(by_name[name])
-                else:
-                    new_subs.append({"name": name, "checked": False,
-                                     "comment": "", "subsubcategories": []})
-            if [s.get("name") for s in subs] != [s.get("name")
-                                                 for s in new_subs]:
-                p["subcategories"] = new_subs
-                changed = True
-        if changed:
-            save_projects(self.projects)
+    def _reconcile_subcategories(self, p, new_names):
+        subs = p.get("subcategories", [])
+        by_name = {s.get("name"): s for s in subs}
+        new_subs = []
+        for name in new_names:
+            if name in by_name:
+                new_subs.append(by_name[name])
+            else:
+                new_subs.append({"name": name, "checked": False,
+                                 "comment": "", "subsubcategories": []})
+        p["subcategories"] = new_subs
 
     def _edit_project(self, p, anchor=None):
         dlg = ProjectDialog(self.root, "Edit Project", name=p.get("name", ""),
