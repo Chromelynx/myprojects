@@ -17,6 +17,7 @@ from datetime import datetime
 APP_NAME = "MyProjects"
 DATA_DIR = os.path.expanduser("~/.local/share/myprojects")
 DATA_FILE = os.path.join(DATA_DIR, "projects.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 # --- palette (dark, to match a Hyprland desktop) ---
 BG        = "#1e1e2e"
@@ -41,10 +42,38 @@ def today():
     return datetime.now().strftime("%Y-%m-%d")
 
 
+def load_settings():
+    if not os.path.exists(SETTINGS_FILE):
+        return {}
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def load_default_subcategories():
+    names = load_settings().get("default_subcategories")
+    if isinstance(names, list) and names:
+        return [str(n) for n in names if str(n).strip()]
+    return list(DEFAULT_SUBCATEGORIES)
+
+
+def save_default_subcategories(names):
+    settings = load_settings()
+    settings["default_subcategories"] = names
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, SETTINGS_FILE)
+
+
 def make_default_subcategories():
     return [{"name": n, "checked": False, "comment": "",
              "subsubcategories": []}
-            for n in DEFAULT_SUBCATEGORIES]
+            for n in load_default_subcategories()]
 
 
 def load_projects():
@@ -293,6 +322,171 @@ class SubcategoryWindow(tk.Toplevel):
         self.destroy()
 
 
+class ManageSubcategoriesWindow(tk.Toplevel):
+    """Edit the default subcategory list: add, remove, and reorder."""
+
+    def __init__(self, master, names):
+        super().__init__(master)
+        self.result = None  # (names, apply_existing) or None on cancel
+        self.title("Manage Subcategories")
+        self.configure(bg=BG)
+        self.resizable(False, False)
+        self.transient(master)
+
+        outer = tk.Frame(self, bg=BG, padx=18, pady=18)
+        outer.pack(fill="both", expand=True)
+
+        tk.Label(outer, text="Subcategories", bg=BG, fg=FG,
+                 font=("", 18, "bold")).pack(anchor="w")
+        tk.Label(outer, text="Every new project starts with these, in order.",
+                 bg=BG, fg=MUTED, font=("", 13)).pack(anchor="w", pady=(2, 10))
+
+        mid = tk.Frame(outer, bg=BG)
+        mid.pack(fill="both", expand=True)
+
+        lb_frame = tk.Frame(mid, bg=SURFACE2)
+        lb_frame.pack(side="left", fill="both", expand=True)
+        self.listbox = tk.Listbox(lb_frame, height=10, width=30, bg=SURFACE2,
+                                  fg=FG, relief="flat", highlightthickness=0,
+                                  font=("", 18), activestyle="none",
+                                  selectbackground=SURFACE,
+                                  selectforeground=FG)
+        lb_scroll = ttk.Scrollbar(lb_frame, orient="vertical",
+                                  command=self.listbox.yview)
+        self.listbox.configure(yscrollcommand=lb_scroll.set)
+        self.listbox.pack(side="left", fill="both", expand=True)
+        lb_scroll.pack(side="right", fill="y")
+        for n in names:
+            self.listbox.insert("end", n)
+
+        side = tk.Frame(mid, bg=BG)
+        side.pack(side="left", fill="y", padx=(10, 0))
+        self._side_btn(side, "Move Up", self._move_up).pack(fill="x", pady=(0, 6))
+        self._side_btn(side, "Move Down", self._move_down).pack(fill="x", pady=(0, 6))
+        self._side_btn(side, "Remove", self._remove, danger=True).pack(fill="x")
+
+        add_row = tk.Frame(outer, bg=BG)
+        add_row.pack(fill="x", pady=(10, 0))
+        self.add_entry = tk.Entry(add_row, bg=SURFACE2, fg=FG,
+                                  insertbackground=FG, relief="flat",
+                                  highlightthickness=1,
+                                  highlightbackground=BORDER,
+                                  highlightcolor=ACCENT, font=("", 18))
+        self.add_entry.pack(side="left", fill="x", expand=True, ipady=4)
+        self.add_entry.bind("<Return>", self._add)
+        tk.Button(add_row, text="+ Add", command=self._add,
+                  bg=ACCENT, fg=ACCENT_DK, activebackground=GREEN,
+                  activeforeground=ACCENT_DK, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 14, "bold"),
+                  padx=12, pady=4, cursor="hand2").pack(side="left", padx=(8, 0))
+
+        self.apply_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(outer, text="Also update existing projects",
+                       variable=self.apply_var, bg=BG, fg=FG,
+                       activebackground=BG, activeforeground=FG,
+                       selectcolor=SURFACE2, font=("", 13),
+                       anchor="w").pack(anchor="w", pady=(12, 0))
+        tk.Label(outer, text="(removing a stage also deletes its checkmarks,\n"
+                             "tasks and notes in those projects)",
+                 bg=BG, fg=MUTED, font=("", 13), justify="left").pack(
+            anchor="w", pady=(2, 0))
+
+        btn_row = tk.Frame(outer, bg=BG)
+        btn_row.pack(fill="x", pady=(14, 0))
+        tk.Button(btn_row, text="Cancel", command=self.destroy,
+                  bg=SURFACE2, fg=FG, activebackground=SURFACE2,
+                  activeforeground=FG, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 14), padx=16, pady=6,
+                  cursor="hand2").pack(side="right", padx=(8, 0))
+        tk.Button(btn_row, text="Save", command=self._save,
+                  bg=ACCENT, fg=ACCENT_DK, activebackground=GREEN,
+                  activeforeground=ACCENT_DK, relief="flat", bd=0,
+                  highlightthickness=0, font=("", 14, "bold"),
+                  padx=20, pady=6, cursor="hand2").pack(side="right")
+
+        self.add_entry.focus_set()
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self._outside_funcid = master.bind("<Button-1>",
+                                           self._on_outside_click, add="+")
+
+    def _side_btn(self, parent, text, command, danger=False):
+        fg = RED if danger else FG
+        return tk.Button(parent, text=text, command=command, bg=SURFACE2,
+                         fg=fg, activebackground=SURFACE2, activeforeground=fg,
+                         relief="flat", bd=0, highlightthickness=0,
+                         font=("", 14), padx=14, pady=4, cursor="hand2")
+
+    def _on_outside_click(self, event):
+        self.destroy()
+
+    def destroy(self):
+        if getattr(self, "_outside_funcid", None):
+            try:
+                self.master.unbind("<Button-1>", self._outside_funcid)
+            except tk.TclError:
+                pass
+            self._outside_funcid = None
+        super().destroy()
+
+    def _names(self):
+        return list(self.listbox.get(0, "end"))
+
+    def _selected_index(self):
+        sel = self.listbox.curselection()
+        return sel[0] if sel else None
+
+    def _add(self, event=None):
+        name = self.add_entry.get().strip()
+        if not name or name in self._names():
+            self.bell()
+            return
+        self.listbox.insert("end", name)
+        self.add_entry.delete(0, "end")
+        self.listbox.selection_clear(0, "end")
+        self.listbox.selection_set("end")
+        self.listbox.see("end")
+
+    def _remove(self):
+        idx = self._selected_index()
+        if idx is None:
+            self.bell()
+            return
+        self.listbox.delete(idx)
+        if self.listbox.size():
+            self.listbox.selection_set(min(idx, self.listbox.size() - 1))
+
+    def _move_up(self):
+        idx = self._selected_index()
+        if idx is None or idx == 0:
+            return
+        name = self.listbox.get(idx)
+        self.listbox.delete(idx)
+        self.listbox.insert(idx - 1, name)
+        self.listbox.selection_clear(0, "end")
+        self.listbox.selection_set(idx - 1)
+        self.listbox.see(idx - 1)
+
+    def _move_down(self):
+        idx = self._selected_index()
+        if idx is None or idx >= self.listbox.size() - 1:
+            return
+        name = self.listbox.get(idx)
+        self.listbox.delete(idx)
+        self.listbox.insert(idx + 1, name)
+        self.listbox.selection_clear(0, "end")
+        self.listbox.selection_set(idx + 1)
+        self.listbox.see(idx + 1)
+
+    def _save(self):
+        names = self._names()
+        if not names:
+            self.bell()
+            return
+        self.result = (names, self.apply_var.get())
+        self.destroy()
+
+
 class MyProjectsApp:
     def __init__(self, root):
         self.root = root
@@ -432,6 +626,12 @@ class MyProjectsApp:
                   activeforeground=ACCENT_DK, relief="flat", bd=0,
                   highlightthickness=0, font=("", 13, "bold"),
                   padx=16, pady=8, cursor="hand2").pack(side="left")
+        tk.Button(btns, text="Manage Subcategories",
+                  command=self._manage_subcategories, bg=SURFACE2, fg=FG,
+                  activebackground=SURFACE2, activeforeground=FG,
+                  relief="flat", bd=0, highlightthickness=0,
+                  font=("", 13), padx=16, pady=8,
+                  cursor="hand2").pack(side="right")
 
     def _bind_wheel(self, widget):
         widget.bind("<MouseWheel>", self._on_mousewheel)
@@ -632,6 +832,37 @@ class MyProjectsApp:
                                   "subcategories": make_default_subcategories()})
             save_projects(self.projects)
             self.refresh()
+
+    def _manage_subcategories(self):
+        names = load_default_subcategories()
+        win = ManageSubcategoriesWindow(self.root, names)
+        self.root.wait_window(win)
+        if not win.result:
+            return
+        new_names, apply_existing = win.result
+        save_default_subcategories(new_names)
+        if apply_existing:
+            self._apply_defaults_to_projects(new_names)
+        self.refresh()
+
+    def _apply_defaults_to_projects(self, new_names):
+        changed = False
+        for p in self.projects:
+            subs = p.get("subcategories", [])
+            by_name = {s.get("name"): s for s in subs}
+            new_subs = []
+            for name in new_names:
+                if name in by_name:
+                    new_subs.append(by_name[name])
+                else:
+                    new_subs.append({"name": name, "checked": False,
+                                     "comment": "", "subsubcategories": []})
+            if [s.get("name") for s in subs] != [s.get("name")
+                                                 for s in new_subs]:
+                p["subcategories"] = new_subs
+                changed = True
+        if changed:
+            save_projects(self.projects)
 
     def _edit_project(self, p, anchor=None):
         dlg = ProjectDialog(self.root, "Edit Project", name=p.get("name", ""),
