@@ -54,7 +54,7 @@ def load_settings():
 
 
 def load_default_subcategories():
-    names = load_settings().get("default_subcategories")
+    names = load_settings().get("default_categories")
     if isinstance(names, list) and names:
         return [str(n) for n in names if str(n).strip()]
     return list(DEFAULT_SUBCATEGORIES)
@@ -62,7 +62,7 @@ def load_default_subcategories():
 
 def save_default_subcategories(names):
     settings = load_settings()
-    settings["default_subcategories"] = names
+    settings["default_categories"] = names
     os.makedirs(DATA_DIR, exist_ok=True)
     tmp = SETTINGS_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
@@ -494,10 +494,10 @@ class MyProjectsApp:
         # upgrade any project that predates subcategories / sub-subcategories
         changed = False
         for p in self.projects:
-            if "subcategories" not in p:
-                p["subcategories"] = make_default_subcategories()
+            if "categories" not in p:
+                p["categories"] = make_default_subcategories()
                 changed = True
-            for sub in p.get("subcategories", []):
+            for sub in p.get("categories", []):
                 if "subsubcategories" not in sub:
                     sub["subsubcategories"] = []
                     changed = True
@@ -735,7 +735,7 @@ class MyProjectsApp:
                 seen.add(name)
                 order.append(name)
         for p in visible:
-            for s in p.get("subcategories", []):
+            for s in p.get("categories", []):
                 n = s.get("name")
                 if n and n not in seen:
                     seen.add(n)
@@ -745,7 +745,7 @@ class MyProjectsApp:
     def _render_project_row(self, p, i, col_names):
         is_done = p.get("status") == "done"
         r = i * 3 + 1
-        subs_by_name = {s.get("name"): s for s in p.get("subcategories", [])}
+        subs_by_name = {s.get("name"): s for s in p.get("categories", [])}
 
         tk.Frame(self.projects_frame, bg=BORDER, height=1).grid(
             row=r - 1, column=0, columnspan=4 + len(col_names),
@@ -845,12 +845,12 @@ class MyProjectsApp:
             self.projects.append({"id": uuid.uuid4().hex, "name": name,
                                   "note": note, "status": "active",
                                   "created": today(),
-                                  "subcategories": make_default_subcategories()})
+                                  "categories": make_default_subcategories()})
             save_projects(self.projects)
             self.refresh()
 
     def _manage_project_subcategories(self, p, anchor=None):
-        names = [s.get("name") for s in p.get("subcategories", [])]
+        names = [s.get("name") for s in p.get("categories", [])]
         win = ManageSubcategoriesWindow(self.root, names,
                                         project_name=p.get("name", ""))
         if anchor is not None:
@@ -863,7 +863,7 @@ class MyProjectsApp:
         self.refresh()
 
     def _reconcile_subcategories(self, p, new_names):
-        subs = p.get("subcategories", [])
+        subs = p.get("categories", [])
         by_name = {s.get("name"): s for s in subs}
         new_subs = []
         for name in new_names:
@@ -872,7 +872,7 @@ class MyProjectsApp:
             else:
                 new_subs.append({"name": name, "checked": False,
                                  "comment": "", "subsubcategories": []})
-        p["subcategories"] = new_subs
+        p["categories"] = new_subs
 
     def _edit_project(self, p, anchor=None):
         dlg = ProjectDialog(self.root, "Edit Project", name=p.get("name", ""),
