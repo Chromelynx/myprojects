@@ -494,7 +494,6 @@ class MyProjectsApp:
         self.filter_var = tk.StringVar(value="active")
         self.search_var = tk.StringVar()
         self.search_ph = "Search"
-        self.quick_ph = "Add a project — type a name and press Enter"
         self._sub_vars = []
 
         # upgrade any project that predates subcategories / sub-subcategories
@@ -553,20 +552,6 @@ class MyProjectsApp:
         self.count_label = tk.Label(header, text="", bg=BG, fg=MUTED,
                                     font=("", 13))
         self.count_label.pack(side="right", pady=(8, 0))
-
-        # quick-add
-        quick = tk.Frame(self.root, bg=BG)
-        quick.pack(fill="x", padx=20, pady=(0, 8))
-        self.quick_entry = tk.Entry(quick, bg=SURFACE2, fg=FG,
-                                    insertbackground=FG, relief="flat",
-                                    highlightthickness=1,
-                                    highlightbackground=BORDER,
-                                    highlightcolor=ACCENT, font=("", 14))
-        self.quick_entry.pack(fill="x", ipady=7)
-        self._set_placeholder(self.quick_entry, self.quick_ph)
-        self.quick_entry.bind("<Return>", self._quick_add)
-        self.quick_entry.bind("<FocusIn>", self._clear_placeholder)
-        self.quick_entry.bind("<FocusOut>", self._restore_placeholder)
 
         # filter + search
         bar = tk.Frame(self.root, bg=BG)
@@ -631,7 +616,7 @@ class MyProjectsApp:
                   activebackground=SURFACE2, activeforeground=FG,
                   relief="flat", bd=0, highlightthickness=0,
                   font=("", 13), padx=16, pady=8,
-                  cursor="hand2").pack(side="right")
+                  cursor="hand2").pack(side="left", padx=(8, 0))
 
     def _bind_wheel(self, widget):
         widget.bind("<MouseWheel>", self._on_mousewheel)
@@ -683,12 +668,6 @@ class MyProjectsApp:
             e.insert(0, e._ph)
             e.configure(fg=MUTED)
 
-    def _reset_placeholder(self, entry):
-        entry.delete(0, "end")
-        entry._has_ph = True
-        entry.insert(0, entry._ph)
-        entry.configure(fg=MUTED)
-
     # ---- rendering ----
     def _visible_projects(self):
         status_filter = self.filter_var.get()
@@ -723,8 +702,7 @@ class MyProjectsApp:
         visible = self._visible_projects()
         if not visible:
             tk.Label(self.projects_frame,
-                     text="No projects here. Type a name above and press "
-                          "Enter to add one.",
+                     text='No projects here. Click "+ New Project" to add one.',
                      bg=BG, fg=MUTED, font=("", 14), wraplength=500,
                      justify="left").pack(anchor="w", padx=4, pady=18)
             return
@@ -810,17 +788,6 @@ class MyProjectsApp:
         save_projects(self.projects)
 
     # ---- project actions ----
-    def _quick_add(self, event=None):
-        name = self.quick_entry.get().strip()
-        if not name or getattr(self.quick_entry, "_has_ph", False):
-            return
-        self.projects.append({"id": uuid.uuid4().hex, "name": name, "note": "",
-                              "status": "active", "created": today(),
-                              "subcategories": make_default_subcategories()})
-        save_projects(self.projects)
-        self._reset_placeholder(self.quick_entry)
-        self.refresh()
-
     def _add(self):
         dlg = ProjectDialog(self.root, "New Project")
         self.root.wait_window(dlg)
