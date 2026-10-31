@@ -635,6 +635,24 @@ class MyProjectsApp:
             y = max(0, sh - h - 12)
         win.geometry(f"+{x}+{y}")
 
+    def _place_below_right(self, win, anchor):
+        """Position a popup below the anchor, flush against the window's
+        right edge (clamped)."""
+        win.update_idletasks()
+        w = win.winfo_width()
+        h = win.winfo_height()
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        x = self.root.winfo_rootx() + self.root.winfo_width() - w - 12
+        y = anchor.winfo_rooty() + anchor.winfo_height() + 6
+        if x < 0:
+            x = 0
+        if x + w > sw:
+            x = max(0, sw - w - 12)
+        if y + h > sh:
+            y = max(0, sh - h - 12)
+        win.geometry(f"+{x}+{y}")
+
     # ---- placeholder handling ----
     def _set_placeholder(self, entry, text):
         entry._ph = text
@@ -836,7 +854,7 @@ class MyProjectsApp:
         win = ManageSubcategoriesWindow(self.root, names,
                                         project_name=p.get("name", ""))
         if anchor is not None:
-            self._place_below(win, anchor)
+            self._place_below_right(win, anchor)
         self.root.wait_window(win)
         if not win.result:
             return
