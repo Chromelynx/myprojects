@@ -744,7 +744,7 @@ class MyProjectsApp:
             dates += "\n→ " + p["completed"]
         tk.Label(self.projects_frame, text=dates, bg=BG, fg=MUTED,
                  font=("", 12), justify="left").grid(row=r, column=1,
-                 sticky="nw", padx=(0, 8), pady=(10, 0))
+                 sticky="nw", padx=(0, 8), pady=(17, 0))
 
         for j, cname in enumerate(col_names):
             sub = subs_by_name.get(cname)
