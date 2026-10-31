@@ -713,35 +713,20 @@ class MyProjectsApp:
                      bg=BG, fg=MUTED, font=("", 14), wraplength=500,
                      justify="left").pack(anchor="w", padx=4, pady=18)
             return
-        col_names = self._subcategory_columns(visible)
+        max_cats = max(len(p.get("categories", [])) for p in visible)
         if getattr(self, "_spacer_col", None) is not None:
             self.projects_frame.grid_columnconfigure(self._spacer_col, weight=0)
-        self._spacer_col = 2 + len(col_names)
+        self._spacer_col = 2 + max_cats
         self.projects_frame.grid_columnconfigure(self._spacer_col, weight=1)
         for i, p in enumerate(visible):
-            self._render_project_row(p, i, col_names)
+            self._render_project_row(p, i, max_cats)
 
-    def _subcategory_columns(self, visible):
-        """Column order = each project's category order (as set in the
-        Manage Categories window): first-seen across visible projects wins,
-        so the top of a project's list is its leftmost column."""
-        order = []
-        seen = set()
-        for p in visible:
-            for s in p.get("categories", []):
-                n = s.get("name")
-                if n and n not in seen:
-                    seen.add(n)
-                    order.append(n)
-        return order
-
-    def _render_project_row(self, p, i, col_names):
+    def _render_project_row(self, p, i, max_cats):
         is_done = p.get("status") == "done"
         r = i * 3 + 1
-        subs_by_name = {s.get("name"): s for s in p.get("categories", [])}
 
         tk.Frame(self.projects_frame, bg=BORDER, height=1).grid(
-            row=r - 1, column=0, columnspan=4 + len(col_names),
+            row=r - 1, column=0, columnspan=4 + max_cats,
             sticky="ew", pady=(0, 8))
 
         name = ("✓ " if is_done else "") + p.get("name", "Untitled")
@@ -761,13 +746,7 @@ class MyProjectsApp:
                  font=("", 12), justify="left").grid(row=r, column=1,
                  sticky="nw", padx=(0, 8), pady=(17, 0))
 
-        for j, cname in enumerate(col_names):
-            sub = subs_by_name.get(cname)
-            if sub is None:
-                tk.Label(self.projects_frame, text="", bg=BG).grid(
-                    row=r, column=2 + j, sticky="nw", padx=(0, 8),
-                    pady=(10, 0))
-                continue
+        for j, sub in enumerate(p.get("categories", [])):
             cell = tk.Frame(self.projects_frame, bg=BG)
             cell.grid(row=r, column=2 + j, sticky="nw", padx=(0, 8),
                       pady=(10, 0))
@@ -777,7 +756,7 @@ class MyProjectsApp:
                                  command=lambda s=sub, v=var:
                                  self._toggle_subcategory(s, v))
             cb.pack(side="left")
-            btn = tk.Button(cell, text=cname, anchor="w",
+            btn = tk.Button(cell, text=sub.get("name", ""), anchor="w",
                             bg=BG, fg=FG, activebackground=SURFACE2,
                             activeforeground=FG, relief="flat", bd=0,
                             highlightthickness=0, font=("", 14),
@@ -790,13 +769,13 @@ class MyProjectsApp:
 
         mgr = self._small_button(self.projects_frame, "Manage Categories",
                                  None)
-        mgr.grid(row=r, column=3 + len(col_names), sticky="ne",
+        mgr.grid(row=r, column=3 + max_cats, sticky="ne",
                  padx=(8, 4), pady=(10, 0))
         mgr.configure(command=lambda pp=p, w=name_btn:
                       self._manage_project_subcategories(pp, w))
 
         acts = tk.Frame(self.projects_frame, bg=BG)
-        acts.grid(row=r + 1, column=0, columnspan=2 + len(col_names),
+        acts.grid(row=r + 1, column=0, columnspan=2 + max_cats,
                   sticky="w", padx=(4, 0), pady=(0, 10))
         edit_btn = self._small_button(acts, "Edit", None)
         edit_btn.pack(side="left", padx=(0, 6))
